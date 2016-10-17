@@ -6,6 +6,7 @@ import binascii
 import hashlib
 import sys
 import random
+from optparse import OptionParser
 
 def is_prim(num):
     assert num > 0
@@ -86,36 +87,51 @@ def gen_magic(a, b, m):
 
     return (r*a)%m
 
-def encrypt(n, e, msg):
+def encrypt(n, e, src_filename, dst_filename):
     ''' m**e ≡ c (mod n) -> c = m**e % n '''
 
-    en_msg = ''
-    for ch in msg:
-        magic_num = hex(gen_magic(ord(ch), e, n))
-        en_msg += str(magic_num)
+    with open(src_filename, 'rb') as src_file:
+        with open(dst_filename, 'wb') as dst_file:
+            msg = src_file.read()
 
-    return en_msg
+            en_msg = ''
+            for ch in msg:
+                magic_num = hex(gen_magic(ord(ch), e, n))
+                en_msg += str(magic_num)
 
-def decrypt(n, d, msg):
+            dst_file.write(en_msg)
+
+def decrypt(n, d, src_filename, dst_filename):
     ''' c**d ≡ m (mod n) -> m = c**d % n '''
-    de_msg = []
-    for ch in msg:
-        de_msg.append(chr(gen_magic(long(ch, 16), d, n)))
 
-    return de_msg
+    with open(src_filename, 'rb') as src_file:
+        with open(dst_filename, 'wb') as dst_file:
+            msg = src_file.read()
+            msg = [c.replace('L', '').strip() for c in msg.split('0x') if c.strip() != '']
 
-def main():
+            de_msg = ''
+            for ch in msg:
+                de_msg += chr(gen_magic(long(ch, 16), d, n))
+
+            dst_file.write(de_msg)
+
+def main(options):
     x = -1
     n = 0
     e = 0
+
+    if options.is_decrypt:
+        n = options.n
+        x = options.d
+    src_filename = options.src_filename
+    dst_filename = options.dst_filename
+
     while x < 0:
         # 1. get two big prim num
         prim_0 = get_big_prim(get_random())
         prim_1 = get_big_prim(get_random())
         while prim_1 == prim_0:
             prim_1 = get_big_prim(get_random())
-
-        print 'p, q: %s, %s' % (prim_0, prim_1)
 
         # 2. get n
         n = prim_0 * prim_1
@@ -130,27 +146,71 @@ def main():
         # 5. ed ≡ 1 (mod n') -> ed - 1 = k * n' -> ex + n'y = 1
         x, y = calc_x_y(e, n_)
 
-    print '(n, e): %s, %s' % (n, e)
-    print '(n, d): %s, %s' % (n, x)
+    if not options.is_decrypt:
+        with open(src_filename + '.rsa_meta', 'wb') as f:
+            f.write('%s, %s\n%s, %s\n%s, %s' % (prim_0, prim_1, n, e, n, x))
+        print 'gen rsa_meta done ...'
 
-    def show_msg(de_msg):
-        msg = ''
-        for ch in de_msg:
-            msg += ch
+        encrypt(n, e, src_filename, dst_filename)
 
-        print msg
+        print 'encrypt done ...'
+    else:
+        decrypt(n, x, src_filename, dst_filename)
+        print 'decrypt done ...'
 
-    with open(sys.argv[1], 'r') as f:
-        enc = encrypt(n, e, f.read())
+def ParseCmdArgs(argv = sys.argv[1:]):
+    parser = OptionParser(usage = 'Usage: python %prog [options]',
+                          version = '%prog v0.1, debug version',
+                          description = "DESC: %prog  encrypt a 'short' file with RSA")
+    parser.add_option('-s', '--src_file',
+                      dest = 'src_filename',
+                      help = "source filename to be encrypt(or decrypt)")
+    parser.add_option('-d', '--dst_file',
+                      dest = 'dst_filename',
+                      help = "the encrypt(or decrypt) msg write on")
+    parser.add_option('-t', '--decrypt',
+                      dest = 'is_decrypt',
+                      action = 'store_true',
+                      default = False,
+                      help = 'is decrypt src_filename ?')
+    parser.add_option('-x', '--x',
+                      dest = 'n',
+                      default = 0,
+                      type = int,
+                      help = 'use to decrypt: (n, d)')
+    parser.add_option('-y', '--y',
+                      dest = 'd',
+                      default = 0,
+                      type = int,
+                      help = 'use to decrypt: (n, d)')
 
-    with open('%s.rsa' % sys.argv[1], 'w') as f:
-        f.write(enc)
+    (options, args) = parser.parse_args(argv)
+    if len(args) > 0:
+        gLogger.error('unknow argument: %s' % str(args))
+        parser.print_help()
+        return None
 
-    buf = ''
-    with open('%s.rsa' % sys.argv[1], 'r') as f:
-        buf = f.read()
-    buf = [c.strip() for c in buf.split('0x') if c.strip() != '']
-    show_msg(decrypt(n, x, buf))
+    if options.is_decrypt == True:
+        if options.d == 0 or options.n == 0:
+            print "I need 'd' and 'n'"
+            parser.print_help()
+            return None
+
+    if options.src_filename is None:
+        print "I need 'src_filename'"
+        parser.print_help()
+        return None
+
+    if options.dst_filename is None:
+        print "I need 'dst_filename'"
+        parser.print_help()
+        return None
+
+    return (options, args)
 
 if __name__ == '__main__':
-    main()
+    ret = ParseCmdArgs()
+    if ret is None:
+        sys.exit(-1)
+
+    main(ret[0])
